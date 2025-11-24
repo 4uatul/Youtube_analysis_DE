@@ -1,6 +1,4 @@
 # YouTube Data Engineering Project - Complete Breakdown
-## Understanding What the Hell You Actually Built
-
 ---
 
 ## 🎯 THE BIG PICTURE: What's This Project Really About?
