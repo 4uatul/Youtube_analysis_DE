@@ -7,7 +7,7 @@ Imagine you're a marketing analyst who needs to answer: "What types of YouTube v
 
 But you've got a problem: The data is messy, scattered across multiple files, in different formats (JSON and CSV), and you can't just open it in Excel because there are thousands of rows.
 
-**Your solution**: Build an automated data pipeline in AWS that:
+**Solution**: Build an automated data pipeline in AWS that:
 1. Stores the raw data
 2. Cleans and transforms it automatically
 3. Makes it easy to query with SQL
@@ -17,9 +17,9 @@ But you've got a problem: The data is messy, scattered across multiple files, in
 
 ---
 
-## 📊 THE DATA: What You're Working With
+## 📊 THE DATA: What we're Working With
 
-### From Kaggle, you downloaded:
+### From Kaggle, I downloaded:
 
 **JSON Files** (one per region):
 ```
@@ -58,9 +58,9 @@ Each contains ~200 trending videos with columns:
 
 ### STEP 1: DATA INGESTION (Getting Data into AWS)
 
-**What You Did:**
+**What I Did:**
 ```bash
-# Downloaded data from Kaggle to your laptop
+# Downloaded data from Kaggle to my laptop
 # Used AWS CLI to upload to S3
 
 aws s3 cp USvideos.csv s3://your-bucket/raw/csv/region=US/
@@ -68,8 +68,8 @@ aws s3 cp US_category_id.json s3://your-bucket/raw/json/region=US/
 ```
 
 **What Happened:**
-- Your data is now sitting in Amazon S3 (think: cloud Dropbox for big data)
-- You organized it into folders:
+- Data is now sitting in Amazon S3 (think: cloud Dropbox for big data)
+- I organized it into folders:
   - `/raw/csv/` - All the CSV files
   - `/raw/json/` - All the JSON files
 
@@ -82,9 +82,9 @@ aws s3 cp US_category_id.json s3://your-bucket/raw/json/region=US/
 
 ### STEP 2: DATA CATALOGING (Teaching AWS What Your Data Looks Like)
 
-**The Problem**: AWS doesn't know what's in your files. Is column 1 a date? A number? Text?
+**The Problem**: AWS doesn't know what's in the files. Is column 1 a date? A number? Text?
 
-**Your Solution: AWS Glue Crawler**
+**Solution: AWS Glue Crawler**
 
 **What is a Crawler?**
 Think of it like a robot librarian that:
@@ -93,7 +93,7 @@ Think of it like a robot librarian that:
 3. Figures out the structure (columns, data types)
 4. Creates a "table" definition in the Glue Data Catalog
 
-**What You Did:**
+**What I Did:**
 ```
 Created Crawler → Pointed it to s3://your-bucket/raw/json/
 Ran Crawler → It created a table called "raw_json" with schema
@@ -111,7 +111,7 @@ Columns:
 ```
 
 **Why This Matters:**
-Now you can query your S3 files with SQL as if they were database tables!
+Now I can query S3 files with SQL as if they were database tables!
 
 ---
 
@@ -124,7 +124,7 @@ Now you can query your S3 files with SQL as if they were database tables!
 - You write SQL, it reads from S3, returns results
 - You only pay per query (per data scanned)
 
-**What You Did:**
+**What I Did:**
 ```sql
 SELECT * FROM raw_json LIMIT 10;
 ```
@@ -148,7 +148,7 @@ But Athena expects each JSON object on a separate line (NDJSON format):
 {"id": "10", "snippet": {"title": "Music"}}
 ```
 
-**The Fix: You Need to Transform the JSON Files**
+**The Fix: We Need to Transform the JSON Files**
 
 ---
 
@@ -161,7 +161,7 @@ But Athena expects each JSON object on a separate line (NDJSON format):
 - Perfect for small, quick tasks
 - You only pay when the code runs (per millisecond!)
 
-**What You Did:**
+**What I Did:**
 Created a Python Lambda function that:
 
 ```python
@@ -190,7 +190,7 @@ def lambda_handler(event, context):
 - Industry standard for data lakes
 
 **How Lambda Gets Triggered:**
-You set up an **S3 Event Notification**:
+I set up an **S3 Event Notification**:
 ```
 When: New file uploaded to s3://bucket/raw/json/
 Do: Automatically run the Lambda function
@@ -211,7 +211,7 @@ Do: Automatically run the Lambda function
 - For processing large datasets (millions of rows)
 - You write PySpark code, AWS runs it on a cluster
 
-**What You Did:**
+**What I Did:**
 
 ```python
 # Created a Glue Job that:
@@ -249,7 +249,7 @@ glueContext.write_dynamic_frame.from_options(
 
 **The Goal:** Join CSV data (video stats) with JSON data (category names)
 
-**What You Did:**
+**What I Did:**
 Created a visual ETL pipeline:
 
 ```
@@ -293,7 +293,7 @@ abc123   | "..."  | 1.5M  | 50K   | Music          | US
 
 **Tool 1: AWS Athena (SQL Queries)**
 
-Now you can run analysis queries:
+Now I can run analysis queries:
 
 ```sql
 -- Which category has most views?
@@ -367,10 +367,10 @@ Connected QuickSight to Athena and created visualizations:
 
 ---
 
-## 🎓 WHAT ACTUALLY LEARNED
+## 🎓 WHAT I ACTUALLY LEARNED
 
 ### 1. **Data Lake Architecture**
-You built a 3-tier data lake:
+I built a 3-tier data lake:
 - **Landing/Raw Layer:** Original data, untouched
 - **Cleansed/Transformed Layer:** Cleaned data
 - **Analytics/Curated Layer:** Business-ready data
@@ -386,7 +386,7 @@ You built a 3-tier data lake:
 - **Load:** Write to destination (analytics layer)
 
 ### 3. **Event-Driven Architecture**
-You set up automation:
+I set up automation:
 - File uploaded to S3 → Triggers Lambda → Transforms data
 - Glue Crawler runs → Updates catalog → Athena can query new data
 
@@ -398,14 +398,14 @@ You set up automation:
 - **Parquet:** Columnar, compressed, fast queries (winner!)
 
 ### 5. **Partitioning Strategy**
-You organized data by region:
+I organized data by region:
 ```
 /analytics/region=US/data.parquet
 /analytics/region=GB/data.parquet
 ```
 
 **Why?**
-When you query only US data, Athena doesn't scan GB files = faster + cheaper!
+When I query only US data, Athena doesn't scan GB files = faster + cheaper!
 
 ### 6. **IAM Security Best Practices**
 - Never use root account for daily work
