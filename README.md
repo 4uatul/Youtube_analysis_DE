@@ -369,7 +369,7 @@ Connected QuickSight to Athena and created visualizations:
 
 ---
 
-## 🎓 WHAT YOU ACTUALLY LEARNED
+## 🎓 WHAT ACTUALLY LEARNED
 
 ### 1. **Data Lake Architecture**
 You built a 3-tier data lake:
@@ -429,37 +429,6 @@ When you query only US data, Athena doesn't scan GB files = faster + cheaper!
 
 ---
 
-## 🤔 COMMON INTERVIEW QUESTIONS & YOUR ANSWERS
-
-### Q: "Why did you use Lambda AND Glue? Why not just one?"
-
-**Your Answer:**
-"I used Lambda for lightweight, event-driven transformations of small JSON files because it's fast and cost-effective for that use case. For processing large CSV files with complex joins and aggregations, I used Glue Jobs with PySpark because it can handle big data at scale and process millions of rows in parallel. Lambda has a 15-minute timeout, so it's not suitable for long-running ETL jobs."
-
-### Q: "Why Parquet instead of keeping it as JSON/CSV?"
-
-**Your Answer:**
-"Parquet is a columnar storage format that offers significant performance and cost benefits. It compresses data much better than JSON or CSV, reducing storage costs by 70-80%. For analytics queries that only need specific columns, Parquet's columnar structure means we only read the columns we need, making queries 5-10x faster. It also has built-in schema, so we don't have data type issues like we would with CSV."
-
-### Q: "How did you handle data quality issues?"
-
-**Your Answer:**
-"I encountered JSON format issues where the source data wasn't in line-delimited JSON format that Athena requires. I solved this by creating a Lambda function that transforms the JSON structure and converts it to Parquet. I also addressed schema inconsistencies between CSV files by explicitly defining data types in Glue and using PySpark to cast fields to the correct types during transformation."
-
-### Q: "What would you do differently if you had to handle 100TB of data daily?"
-
-**Your Answer:**
-"For that scale, I'd implement incremental loading instead of full refreshes, partition data by both region and date for better query performance, use Glue job bookmarks to track processed files, potentially use AWS EMR instead of Glue for more control over Spark configuration, implement data quality checks with AWS Deequ, and set up CloudWatch alarms for pipeline failures and cost monitoring."
-
-### Q: "How did you optimize costs?"
-
-**Your Answer:**
-"I used several strategies: storing data in Parquet format reduced storage costs by 70-80%, implementing partitioning by region meant Athena scans less data per query, using Lambda for small transformations kept compute costs minimal, and organizing the data into a 3-tier architecture meant we only transform data once and reuse the cleaned version for multiple analyses."
-
----
-
-## 🚀 HOW TO EXPLAIN THIS PROJECT IN INTERVIEWS
-
 ### The 2-Minute Pitch:
 
 "I built an end-to-end data pipeline on AWS to analyze YouTube trending video data from Kaggle. The data came in two formats - JSON files with category mappings and CSV files with video statistics across 5 regions.
@@ -471,18 +440,6 @@ The JSON files had formatting issues, so I created a Lambda function triggered b
 The key challenge was joining the CSV video data with JSON category data, which I solved using Glue Studio to create a visual ETL pipeline that performs the join and writes to the analytics layer, partitioned by region for query optimization.
 
 Finally, I used AWS Athena for ad-hoc SQL analysis and built QuickSight dashboards to visualize insights like trending categories by region and view patterns over time. The entire pipeline is event-driven and serverless, so it scales automatically and I only pay for what I use."
-
----
-
-## 📚 KEY TAKEAWAYS FOR YOUR INTERVIEWS
-
-1. **You understand data lake architecture** (raw → cleansed → analytics)
-2. **You can choose the right tool for the job** (Lambda vs Glue vs EMR)
-3. **You know how to optimize queries** (partitioning, file formats)
-4. **You understand event-driven architecture** (S3 → Lambda triggers)
-5. **You can troubleshoot data issues** (JSON format problems, schema mismatches)
-6. **You implemented security best practices** (IAM roles, least privilege)
-7. **You know how to make data accessible** (Athena for analysts, QuickSight for business users)
 
 ---
 
@@ -507,8 +464,7 @@ GLUE DATA CATALOG (metadata)
 │   (small/fast)      │    (big/parallel) │
 └─────────────────────┴───────────────────┘
     ↓                        ↓
-S3 (cleansed layer - both in Parquet)
-    ↓
+S3 (cleansed layer - both in Parquet)    ↓
 GLUE STUDIO ETL PIPELINE
 (join CSV + JSON on category_id)
     ↓
@@ -522,36 +478,4 @@ GLUE CRAWLER (catalog analytics table)
 └─────────────────────┴───────────────────┘
 ```
 
----
 
-## 💡 BONUS: REAL-WORLD APPLICATIONS
-
-This exact architecture is used by companies for:
-- **E-commerce:** Analyzing customer behavior data
-- **IoT:** Processing sensor data from devices
-- **Marketing:** Campaign performance analytics
-- **Gaming:** Player behavior analysis
-- **Healthcare:** Medical records analytics (with proper security)
-
-**Companies using similar architectures:**
-- Netflix (viewing data)
-- Airbnb (booking analytics)
-- Uber (trip data)
-- Spotify (listening patterns)
-
----
-
-## 🎯 FINAL THOUGHTS
-
-You didn't just follow a tutorial - you built a production-grade data pipeline using industry-standard tools and best practices. This is exactly what data engineers do in real companies every day.
-
-The skills you learned:
-✅ Cloud data lakes
-✅ ETL pipeline design
-✅ Event-driven architecture
-✅ Data optimization (formats, partitioning)
-✅ Security (IAM)
-✅ SQL querying
-✅ Data visualization
-
-These are the foundation of modern data engineering. You're ready to talk about this project confidently!
