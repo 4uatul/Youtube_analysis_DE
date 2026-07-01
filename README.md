@@ -1,181 +1,104 @@
-# YouTube Data Engineering Project - Complete Breakdown
----
+# YouTube Trending Video Data Pipeline
 
-## 🎯 THE BIG PICTURE: What's This Project Really About?
+An end-to-end data pipeline I built on AWS to analyze YouTube trending video data. The goal was to answer questions like which categories trend the most, what drives views, and how patterns differ by region, using data that started out messy, scattered across formats, and too large to just open in Excel.
 
-Imagine you're a marketing analyst who needs to answer: "What types of YouTube videos get trending? Which categories are most popular? What makes a video go viral?"
+## The data
 
-But you've got a problem: The data is messy, scattered across multiple files, in different formats (JSON and CSV), and you can't just open it in Excel because there are thousands of rows.
+Source data came from Kaggle, split across two formats:
 
-**Solution**: Build an automated data pipeline in AWS that:
-1. Stores the raw data
-2. Cleans and transforms it automatically
-3. Makes it easy to query with SQL
-4. Visualizes insights in dashboards
-
-**Think of it like**: Building a factory assembly line for data instead of cars.
-
----
-
-## 📊 THE DATA: What we're Working With
-
-### From Kaggle, I downloaded:
-
-**JSON Files** (one per region):
+**JSON files** (one per region) containing category ID to name mappings:
 ```
 US_category_id.json
 GB_category_id.json
 CA_category_id.json
-etc.
 ```
-These contain category mappings like:
-- Category ID 1 = "Film & Animation"
-- Category ID 10 = "Music"
-- Category ID 24 = "Entertainment"
 
-**CSV Files** (one per region, per day):
+**CSV files** (one per region) with roughly 200 trending videos each:
 ```
 USvideos.csv
 GBvideos.csv
 CAvideos.csv
-etc.
 ```
-Each contains ~200 trending videos with columns:
-- video_id
-- title
-- channel_title
-- category_id (just a number like "24")
-- views, likes, dislikes, comments
-- publish_time
-- tags
-- description
+Columns include video_id, title, channel_title, category_id, views, likes, dislikes, comments, publish_time, tags, and description.
 
-**The Problem**: The CSV files only have category_id as a number. You need to JOIN it with the JSON files to get the actual category name.
+The CSV files only have category_id as a raw number, so I needed to join them against the JSON files to get actual category names.
 
----
+## Architecture
 
-## 🏗️ THE ARCHITECTURE: Step-by-Step Data Flow
+I built a three-tier data lake in S3:
 
-### STEP 1: DATA INGESTION (Getting Data into AWS)
+```
+KAGGLE DATA
+    |
+LAPTOP (download)
+    |
+AWS CLI (upload)
+    |
+S3 (raw layer)
+    |
+GLUE CRAWLER (scan and catalog)
+    |
+GLUE DATA CATALOG (metadata)
+    |
++---------------------+-------------------+
+|   JSON FILES        |    CSV FILES      |
+|   Lambda Function   |    Glue Job       |
++---------------------+-------------------+
+    |                        |
+S3 (cleansed layer, both in Parquet)
+    |
+GLUE STUDIO ETL PIPELINE
+(join CSV + JSON on category_id)
+    |
+S3 (analytics layer, final joined data)
+    |
+GLUE CRAWLER (catalog analytics table)
+    |
++---------------------+-------------------+
+|   ATHENA            |    QUICKSIGHT     |
+|   (SQL queries)     |    (dashboards)   |
++---------------------+-------------------+
+```
 
-**What I Did:**
+**Raw layer**: original data, untouched, kept for audit and debugging.
+**Cleansed layer**: transformed into Parquet, schema fixed, ready to query.
+**Analytics layer**: joined and business-ready, partitioned by region.
+
+## How I built it
+
+### 1. Ingestion
+
+I downloaded the data from Kaggle and pushed it to S3 with the AWS CLI, organized into `/raw/csv/` and `/raw/json/`:
+
 ```bash
-# Downloaded data from Kaggle to my laptop
-# Used AWS CLI to upload to S3
-
 aws s3 cp USvideos.csv s3://your-bucket/raw/csv/region=US/
 aws s3 cp US_category_id.json s3://your-bucket/raw/json/region=US/
 ```
 
-**What Happened:**
-- Data is now sitting in Amazon S3 (think: cloud Dropbox for big data)
-- I organized it into folders:
-  - `/raw/csv/` - All the CSV files
-  - `/raw/json/` - All the JSON files
+I picked S3 because it's cheap, scales to any size, and every other AWS service in this pipeline can read from it directly.
 
-**Why S3?**
-- It's cheap (pennies per GB)
-- Scalable (can store petabytes)
-- Other AWS services can directly read from it
+### 2. Cataloging
 
----
+AWS doesn't know what's inside a raw file by default, so I used a **Glue Crawler** to scan the files in S3, infer the schema, and register a table definition in the **Glue Data Catalog**. Once that ran, I could query the S3 files with SQL as if they were database tables.
 
-### STEP 2: DATA CATALOGING (Teaching AWS What Your Data Looks Like)
+### 3. First query attempt, and why it failed
 
-**The Problem**: AWS doesn't know what's in the files. Is column 1 a date? A number? Text?
-
-**Solution: AWS Glue Crawler**
-
-**What is a Crawler?**
-Think of it like a robot librarian that:
-1. Opens your files in S3
-2. Reads the first few rows
-3. Figures out the structure (columns, data types)
-4. Creates a "table" definition in the Glue Data Catalog
-
-**What I Did:**
-```
-Created Crawler → Pointed it to s3://your-bucket/raw/json/
-Ran Crawler → It created a table called "raw_json" with schema
-```
-
-**The Result: Glue Data Catalog**
-Now AWS has a metadata database that says:
-```
-Table: raw_json
-Columns:
-  - id: string
-  - snippet: struct (nested JSON)
-    - title: string
-    - assignable: boolean
-```
-
-**Why This Matters:**
-Now I can query S3 files with SQL as if they were database tables!
-
----
-
-### STEP 3: QUERYING DATA (First Attempt - It Failed!)
-
-**Tool: AWS Athena**
-
-**What is Athena?**
-- It's a serverless SQL query engine
-- You write SQL, it reads from S3, returns results
-- You only pay per query (per data scanned)
-
-**What I Did:**
+I tried querying the raw JSON with Athena:
 ```sql
 SELECT * FROM raw_json LIMIT 10;
 ```
+It errored out. The Kaggle JSON files were structured as a single object with a nested `items` array, but Athena expects newline-delimited JSON, one object per line. That meant the raw JSON needed to be transformed before it was queryable.
 
-**What Happened:** ERROR! 🔥
+### 4. Fixing the JSON with Lambda
 
-**Why It Failed:**
-The JSON files from Kaggle were formatted like this:
-```json
-{
-  "items": [
-    {"id": "1", "snippet": {"title": "Film"}},
-    {"id": "10", "snippet": {"title": "Music"}}
-  ]
-}
-```
-
-But Athena expects each JSON object on a separate line (NDJSON format):
-```json
-{"id": "1", "snippet": {"title": "Film"}}
-{"id": "10", "snippet": {"title": "Music"}}
-```
-
-**The Fix: We Need to Transform the JSON Files**
-
----
-
-### STEP 4: DATA TRANSFORMATION (Fixing the JSON Problem)
-
-**Tool: AWS Lambda Function**
-
-**What is Lambda?**
-- Serverless computing = you write code, AWS runs it, you don't manage servers
-- Perfect for small, quick tasks
-- You only pay when the code runs (per millisecond!)
-
-**What I Did:**
-Created a Python Lambda function that:
+I wrote a Python Lambda function that reads the raw JSON, flattens the nested `items` array into a table, and writes the result back to S3 as Parquet:
 
 ```python
 import awswrangler as wr
-import pandas as pd
 
 def lambda_handler(event, context):
-    # 1. Read the broken JSON from S3
     df = wr.s3.read_json('s3://bucket/raw/json/US_category_id.json')
-    
-    # 2. Flatten it (convert nested JSON to table)
-    # Extract the 'items' array and normalize it
-    
-    # 3. Write it back as Parquet format to S3
+    # flatten nested items array
     wr.s3.to_parquet(
         df=df,
         path='s3://bucket/cleansed/json/region=US/',
@@ -183,51 +106,18 @@ def lambda_handler(event, context):
     )
 ```
 
-**Why Parquet Instead of JSON?**
-- Parquet is a columnar storage format
-- Much faster to query (5-10x)
-- Smaller file size (compressed)
-- Industry standard for data lakes
+I chose Parquet over JSON because it's columnar, compresses well, and queries 5 to 10x faster in Athena. The Lambda is triggered automatically by an S3 event notification whenever a new file lands in `/raw/json/`, so there's no manual step involved.
 
-**How Lambda Gets Triggered:**
-I set up an **S3 Event Notification**:
-```
-When: New file uploaded to s3://bucket/raw/json/
-Do: Automatically run the Lambda function
-```
+### 5. Processing the CSVs with Glue
 
-**The Result:**
-- Raw JSON in `/raw/json/` (messy, can't query)
-- Clean Parquet in `/cleansed/json/` (ready to query!)
-
----
-
-### STEP 5: PROCESSING CSV FILES (Cleaning the Video Data)
-
-**Tool: AWS Glue Job (PySpark)**
-
-**What is a Glue Job?**
-- Managed Apache Spark environment
-- For processing large datasets (millions of rows)
-- You write PySpark code, AWS runs it on a cluster
-
-**What I Did:**
+The CSV files were larger and needed heavier cleanup (fixing types, handling missing values, standardizing column names), so I used a **Glue Job** running PySpark instead of Lambda. Lambda caps out at 15 minutes and 10GB of memory, which isn't built for this kind of parallel processing at scale.
 
 ```python
-# Created a Glue Job that:
-
-# 1. Read CSV files from S3
 df_csv = glueContext.create_dynamic_frame.from_catalog(
     database="youtube_db",
     table_name="raw_csv"
 )
 
-# 2. Clean the data
-# - Fix data types (convert strings to integers where needed)
-# - Handle missing values
-# - Standardize column names
-
-# 3. Write to cleansed layer
 glueContext.write_dynamic_frame.from_options(
     frame=df_csv,
     connection_type="s3",
@@ -236,42 +126,17 @@ glueContext.write_dynamic_frame.from_options(
 )
 ```
 
-**Why PySpark Instead of Lambda?**
-- Lambda has limits (15 min max, 10GB memory)
-- Glue can process huge files in parallel
-- Designed for big data ETL
+### 6. Joining CSV and JSON
 
----
+With both datasets cleansed and in Parquet, I used **Glue Studio** to build a visual ETL pipeline that joins the video stats against the category names on `category_id`:
 
-### STEP 6: JOINING THE DATA (Creating the Analytics Layer)
-
-**Tool: AWS Glue Studio (Visual ETL)**
-
-**The Goal:** Join CSV data (video stats) with JSON data (category names)
-
-**What I Did:**
-Created a visual ETL pipeline:
-
-```
-[Source: cleansed_csv] 
-        ↓
-    [Transform: Cast Types]
-        ↓
-    [Join] ← [Source: cleansed_json]
-        ↓
-    [Select Fields]
-        ↓
-    [Target: s3://bucket/analytics/]
-```
-
-**The Join Logic:**
 ```sql
-SELECT 
+SELECT
     csv.video_id,
     csv.title,
     csv.views,
     csv.likes,
-    json.category_title,  -- This is what we get from joining!
+    json.category_title,
     csv.region
 FROM cleansed_csv csv
 LEFT JOIN cleansed_json json
@@ -279,201 +144,52 @@ LEFT JOIN cleansed_json json
     AND csv.region = json.region
 ```
 
-**The Result:**
-Final analytics table with all the data together:
-```
-video_id | title | views | likes | category_title | region
----------|-------|-------|-------|----------------|-------
-abc123   | "..."  | 1.5M  | 50K   | Music          | US
-```
+The output lands in the analytics layer, partitioned by region so queries scoped to one region don't scan data for the others.
 
----
+### 7. Querying and visualization
 
-### STEP 7: QUERYING & VISUALIZATION
-
-**Tool 1: AWS Athena (SQL Queries)**
-
-Now I can run analysis queries:
+With the analytics table cataloged, I ran ad-hoc SQL in **Athena**:
 
 ```sql
--- Which category has most views?
-SELECT 
+SELECT
     category_title,
     SUM(views) as total_views,
     COUNT(*) as video_count
 FROM analytics_table
 GROUP BY category_title
 ORDER BY total_views DESC;
-
--- Top trending videos by region
-SELECT 
-    region,
-    title,
-    views,
-    likes
-FROM analytics_table
-WHERE region = 'US'
-ORDER BY views DESC
-LIMIT 10;
 ```
 
-**Tool 2: AWS QuickSight (Dashboards)**
+Then connected **QuickSight** to Athena for dashboards: views by category, trending over time, video distribution by region, and top-line KPIs like total views and average likes.
 
-Connected QuickSight to Athena and created visualizations:
-- Bar chart: Views by Category
-- Line chart: Trending over time
-- Pie chart: Video distribution by region
-- KPIs: Total views, avg likes, etc.
+## AWS services used
 
----
+| Service | Purpose |
+|---------|---------|
+| S3 | Storage for raw, cleansed, and analytics layers |
+| IAM | Roles and permissions between services |
+| Glue Crawler | Scans files and infers schema |
+| Glue Data Catalog | Metadata store for table definitions |
+| Glue Jobs (PySpark) | Large-scale CSV cleaning and transformation |
+| Glue Studio | Visual ETL pipeline for the join step |
+| Lambda | Event-triggered JSON to Parquet conversion |
+| Athena | Serverless SQL queries against S3 |
+| QuickSight | Dashboards and visualization |
 
-## 🔑 KEY AWS SERVICES EXPLAINED
+## What I learned
 
-### 1. **S3 (Simple Storage Service)**
-**What it is:** Cloud file storage
-**Why you used it:** Store all your data files (raw, cleaned, analytics)
-**Cost:** ~$0.023 per GB/month
-**Think of it as:** Google Drive but for big data
+**Data lake architecture**: splitting storage into raw, cleansed, and analytics layers keeps the original data intact for debugging while letting the analytics layer stay optimized for speed.
 
-### 2. **IAM (Identity & Access Management)**
-**What it is:** Security system for AWS
-**Why you used it:** Created roles/permissions so services can talk to each other
-**Example:** Lambda needs permission to read S3 and write to S3
+**Event-driven pipelines**: an S3 upload triggers Lambda automatically, and crawler runs keep the catalog current, so nothing here needs a manual step to keep flowing.
 
-### 3. **AWS Glue**
-**What it is:** Managed ETL service
-**Components you used:**
-- **Glue Crawler:** Scans files, creates table schemas
-- **Glue Data Catalog:** Metadata database (stores table definitions)
-- **Glue Jobs:** Run PySpark code for data transformation
-- **Glue Studio:** Visual interface to build ETL pipelines
+**File format tradeoffs**: JSON is readable but slow to query, CSV has no schema or compression, Parquet wins on both speed and size for anything going into an analytics layer.
 
-### 4. **AWS Lambda**
-**What it is:** Serverless compute (run code without servers)
-**Why you used it:** Quick transformations on small files (JSON to Parquet)
-**Limits:** 15 min max runtime, 10GB memory
-**Cost:** Free tier = 1M requests/month
+**Partitioning**: organizing the analytics layer by region means a query scoped to one region skips scanning the others entirely, which cuts both cost and query time in Athena.
 
-### 5. **AWS Athena**
-**What it is:** Serverless SQL query engine
-**Why you used it:** Run SQL queries on S3 data
-**Cost:** $5 per TB scanned
-**Speed:** Queries run in seconds, not minutes
+**IAM practices**: avoided the root account for daily work, used scoped IAM roles for service-to-service access instead of long-lived keys, and kept to least-privilege permissions throughout.
 
-### 6. **AWS QuickSight**
-**What it is:** Business intelligence / dashboard tool
-**Why you used it:** Create visualizations and dashboards
-**Alternative:** Tableau, Power BI
+**Serverless vs managed clusters**: Lambda fits small, fast, event-triggered transformations but caps at 15 minutes and 10GB memory. Glue fits the larger PySpark jobs that need to run longer and process data in parallel.
 
----
+## The pitch
 
-## 🎓 WHAT I ACTUALLY LEARNED
-
-### 1. **Data Lake Architecture**
-I built a 3-tier data lake:
-- **Landing/Raw Layer:** Original data, untouched
-- **Cleansed/Transformed Layer:** Cleaned data
-- **Analytics/Curated Layer:** Business-ready data
-
-**Why 3 layers?**
-- Keep original data (for audit/debugging)
-- Separate transformation logic
-- Optimize analytics layer for speed
-
-### 2. **ETL Pipeline Concepts**
-- **Extract:** Pull data from sources (Kaggle → S3)
-- **Transform:** Clean, join, aggregate data
-- **Load:** Write to destination (analytics layer)
-
-### 3. **Event-Driven Architecture**
-I set up automation:
-- File uploaded to S3 → Triggers Lambda → Transforms data
-- Glue Crawler runs → Updates catalog → Athena can query new data
-
-**Why it matters:** No manual intervention, scales automatically
-
-### 4. **Data Formats & Optimization**
-- **JSON:** Human-readable, but slow to query
-- **CSV:** Simple, but no schema, no compression
-- **Parquet:** Columnar, compressed, fast queries (winner!)
-
-### 5. **Partitioning Strategy**
-I organized data by region:
-```
-/analytics/region=US/data.parquet
-/analytics/region=GB/data.parquet
-```
-
-**Why?**
-When I query only US data, Athena doesn't scan GB files = faster + cheaper!
-
-### 6. **IAM Security Best Practices**
-- Never use root account for daily work
-- Create IAM user with limited permissions
-- Use roles (not access keys) for service-to-service access
-- Principle of least privilege
-
-### 7. **Serverless vs. Server-based**
-**Lambda (Serverless):**
-- No server management
-- Pay per use
-- Auto-scales
-- Limited runtime (15 min)
-
-**Glue (Managed Servers):**
-- AWS manages cluster
-- Can run for hours
-- Better for big data
-
----
-
-### The 2-Minute Pitch:
-
-"I built an end-to-end data pipeline on AWS to analyze YouTube trending video data from Kaggle. The data came in two formats - JSON files with category mappings and CSV files with video statistics across 5 regions.
-
-I designed a three-tier data lake architecture in S3 with raw, cleansed, and analytics layers. For the raw layer, I ingested data using AWS CLI and set up AWS Glue crawlers to automatically discover and catalog the schema.
-
-The JSON files had formatting issues, so I created a Lambda function triggered by S3 events that automatically transforms incoming JSON files to Parquet format for better query performance. For the larger CSV files, I built Glue ETL jobs using PySpark to clean and transform the data.
-
-The key challenge was joining the CSV video data with JSON category data, which I solved using Glue Studio to create a visual ETL pipeline that performs the join and writes to the analytics layer, partitioned by region for query optimization.
-
-Finally, I used AWS Athena for ad-hoc SQL analysis and built QuickSight dashboards to visualize insights like trending categories by region and view patterns over time. The entire pipeline is event-driven and serverless, so it scales automatically and I only pay for what I use."
-
----
-
-## 🔧 THE ACTUAL TECHNICAL FLOW (TL;DR)
-
-```
-KAGGLE DATA
-    ↓
-LAPTOP (download)
-    ↓
-AWS CLI (upload)
-    ↓
-S3 (raw layer)
-    ↓
-GLUE CRAWLER (scan & catalog)
-    ↓
-GLUE DATA CATALOG (metadata)
-    ↓
-┌─────────────────────┬───────────────────┐
-│   JSON FILES        │    CSV FILES      │
-│   Lambda Function   │    Glue Job       │
-│   (small/fast)      │    (big/parallel) │
-└─────────────────────┴───────────────────┘
-    ↓                        ↓
-S3 (cleansed layer - both in Parquet)    ↓
-GLUE STUDIO ETL PIPELINE
-(join CSV + JSON on category_id)
-    ↓
-S3 (analytics layer - final joined data)
-    ↓
-GLUE CRAWLER (catalog analytics table)
-    ↓
-┌─────────────────────┬───────────────────┐
-│   ATHENA            │    QUICKSIGHT     │
-│   (SQL queries)     │    (dashboards)   │
-└─────────────────────┴───────────────────┘
-```
-
-
+I built an end-to-end data pipeline on AWS to analyze YouTube trending video data from Kaggle, combining JSON category mappings with CSV video statistics across five regions. I designed a three-tier data lake in S3 with raw, cleansed, and analytics layers, using Glue Crawlers to catalog schema automatically. The JSON files had formatting issues that broke Athena queries, so I built a Lambda function triggered by S3 events to convert them to Parquet on the fly. For the larger CSV files, I used Glue ETL jobs with PySpark. The core challenge was joining CSV video data with JSON category data, which I solved with a Glue Studio visual pipeline that writes the joined output to the analytics layer, partitioned by region. I used Athena for ad-hoc SQL analysis and built QuickSight dashboards on top for trend visualization. The whole pipeline is event-driven and serverless, so it scales automatically and I only pay for what runs.
